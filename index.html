@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Doctordle: USMLE Step 1</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --teal: #0d9488;
+            --teal-light: #ccfbf1;
+            --teal-dark: #0f766e;
+            --red: #dc2626;
+            --red-light: #fee2e2;
+            --green: #16a34a;
+            --green-light: #dcfce7;
+            --blue: #2563eb;
+            --blue-light: #dbeafe;
+            --text: #111827;
+            --text-muted: #6b7280;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --border: #e5e7eb;
+            --clue-unlocked: #f0fdfa;
+            --clue-locked: #f9fafb;
+        }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--bg);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 32px 16px 64px;
+        }
+
+        header { text-align: center; margin-bottom: 32px; }
+        .logo { font-family: 'DM Serif Display', serif; font-size: 38px; color: var(--text); letter-spacing: -1px; }
+        .logo span { color: var(--teal); }
+        .tagline { font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 2px; margin-top: 4px; }
+
+        .card {
+            background: var(--surface);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            padding: 28px;
+            width: 100%;
+            max-width: 580px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.04);
+        }
+
+        /* ── Progress dots ── */
+        .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .progress-label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+        .guess-dots { display: flex; gap: 6px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); transition: background 0.3s; }
+        .dot.used    { background: var(--red); }
+        .dot.correct { background: var(--green); }
+
+        /* ── Session counter ── */
+        .session-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+            padding: 8px 12px;
+            background: var(--clue-locked);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .session-text {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .session-text strong { color: var(--teal); }
+        .session-progress {
+            height: 4px;
+            flex: 1;
+            margin: 0 12px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .session-progress-fill {
+            height: 100%;
+            background: var(--teal);
+            border-radius: 4px;
+            transition: width 0.4s ease;
+        }
+
+        /* ── Clues ── */
+        .clues-container { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+        .clue-row { display: flex; gap: 10px; align-items: flex-start; }
+        .clue-number {
+            min-width: 24px; height: 24px; border-radius: 50%;
+            background: var(--teal); color: white; font-size: 11px; font-weight: 600;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; margin-top: 10px;
+        }
+        .clue-box {
+            flex: 1; border-radius: 10px; padding: 12px 14px;
+            font-size: 15px; line-height: 1.5; color: var(--text);
+            border: 1px solid var(--border); background: var(--clue-unlocked);
+            animation: revealClue 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .clue-row.locked .clue-number { background: var(--border); }
+        .clue-row.locked .clue-box { background: var(--clue-locked); color: var(--text-muted); font-style: italic; }
+        @keyframes revealClue { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ── Input + autocomplete ── */
+        .input-area { display: flex; gap: 8px; position: relative; }
+        .input-wrapper { flex: 1; position: relative; }
+
+        .guess-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 15px;
+            color: var(--text);
+            background: var(--surface);
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .guess-input:focus { border-color: var(--teal); }
+        .guess-input::placeholder { color: #9ca3af; }
+        .guess-input.open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-color: transparent; }
+
+        .autocomplete-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%; left: 0; right: 0;
+            background: var(--surface);
+            border: 1.5px solid var(--teal);
+            border-top: none;
+            border-bottom-left-radius: 10px;
+            border-bottom-right-radius: 10px;
+            max-height: 240px;
+            overflow-y: auto;
+            z-index: 100;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+        }
+        .autocomplete-dropdown.visible { display: block; }
+
+        .ac-item {
+            padding: 10px 16px;
+            font-size: 15px;
+            color: var(--text);
+            cursor: pointer;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.12s;
+        }
+        .ac-item:last-child { border-bottom: none; }
+        .ac-item:hover, .ac-item.active { background: var(--clue-unlocked); }
+        .ac-item mark { background: none; color: var(--teal); font-weight: 600; }
+
+        .submit-btn {
+            padding: 12px 22px;
+            background: var(--teal); color: white; border: none;
+            border-radius: 10px; font-family: 'DM Sans', sans-serif;
+            font-size: 15px; font-weight: 600; cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+            white-space: nowrap; align-self: flex-start;
+        }
+        .submit-btn:hover  { background: var(--teal-dark); }
+        .submit-btn:active { transform: scale(0.97); }
+
+        .wrong-flash { animation: wrongShake 0.4s ease; }
+        @keyframes wrongShake {
+            0%,100% { transform: translateX(0); }
+            20%      { transform: translateX(-6px); }
+            60%      { transform: translateX(6px); }
+        }
+
+        /* ── Result + explanation ── */
+        .result-banner { display: none; margin-top: 18px; border-radius: 10px; padding: 14px 18px; font-size: 15px; font-weight: 600; text-align: center; }
+        .result-banner.win  { background: var(--green-light); color: var(--green); }
+        .result-banner.lose { background: var(--red-light);   color: var(--red); }
+
+        .explanation { display: none; margin-top: 16px; padding: 16px; background: var(--blue-light); border-radius: 10px; border-left: 3px solid var(--blue); }
+        .explanation-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--blue); margin-bottom: 6px; }
+        .explanation-text { font-size: 14px; line-height: 1.65; color: #1e3a5f; }
+        .high-yield-badge { display: inline-block; margin-top: 10px; padding: 4px 10px; background: #1d4ed8; color: white; font-size: 12px; font-weight: 600; border-radius: 20px; }
+
+        /* ── All cases done banner ── */
+        .all-done {
+            display: none;
+            text-align: center;
+            padding: 32px 16px;
+        }
+        .all-done-icon { font-size: 40px; margin-bottom: 12px; }
+        .all-done h2 { font-family: 'DM Serif Display', serif; font-size: 24px; color: var(--text); margin-bottom: 8px; }
+        .all-done p { font-size: 15px; color: var(--text-muted); margin-bottom: 20px; }
+
+        .play-again-btn {
+            display: none; width: 100%; margin-top: 14px; padding: 13px;
+            background: var(--text); color: white; border: none; border-radius: 10px;
+            font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 600;
+            cursor: pointer; transition: background 0.2s, transform 0.1s;
+        }
+        .play-again-btn:hover  { background: #374151; }
+        .play-again-btn:active { transform: scale(0.98); }
+
+        .restart-btn {
+            display: inline-block; padding: 13px 28px;
+            background: var(--teal); color: white; border: none; border-radius: 10px;
+            font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 600;
+            cursor: pointer; transition: background 0.2s, transform 0.1s;
+        }
+        .restart-btn:hover  { background: var(--teal-dark); }
+        .restart-btn:active { transform: scale(0.98); }
+
+        /* ── Loading / Error ── */
+        .loading { text-align: center; padding: 40px 0; }
+        .loading-icon { font-size: 36px; animation: pulse 1.2s ease-in-out infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .loading p { margin-top: 12px; color: var(--text-muted); font-size: 15px; }
+        .error-msg { text-align: center; color: var(--red); padding: 20px 0; font-size: 15px; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="logo">Doctor<span>dle</span></div>
+    <div class="tagline">USMLE Step 1 &bull; Diagnosis Challenge</div>
+</header>
+
+<div class="card">
+    <div id="loading-area" class="loading">
+        <div class="loading-icon">🩺</div>
+        <p>Loading cases&hellip;</p>
+    </div>
+
+    <div id="game-area" style="display:none;">
+
+        <!-- Session progress bar -->
+        <div class="session-bar" id="session-bar">
+            <span class="session-text" id="session-text">Case <strong>1</strong></span>
+            <div class="session-progress">
+                <div class="session-progress-fill" id="session-fill" style="width:0%"></div>
+            </div>
+            <span class="session-text" id="session-total"></span>
+        </div>
+
+        <div class="progress-header">
+            <span class="progress-label">Clues revealed</span>
+            <div class="guess-dots" id="dots"></div>
+        </div>
+
+        <div class="clues-container" id="clues-container"></div>
+
+        <div class="input-area" id="input-area">
+            <div class="input-wrapper">
+                <input class="guess-input" id="guess-input"
+                       placeholder="Type your diagnosis&hellip;"
+                       autocomplete="off" spellcheck="false">
+                <div class="autocomplete-dropdown" id="ac-dropdown"></div>
+            </div>
+            <button class="submit-btn" onclick="makeGuess()">Guess</button>
+        </div>
+
+        <div class="result-banner" id="result-banner"></div>
+
+        <div class="explanation" id="explanation">
+            <div class="explanation-label">Explanation</div>
+            <div class="explanation-text" id="explanation-text"></div>
+        </div>
+
+        <button class="play-again-btn" id="play-again-btn" onclick="nextCase()">
+            Next case &rarr;
+        </button>
+    </div>
+
+    <!-- Shown when the full deck is exhausted -->
+    <div class="all-done" id="all-done">
+        <div class="all-done-icon">🎓</div>
+        <h2>You've seen every case!</h2>
+        <p>You've worked through all <span id="all-done-count"></span> cases in the bank. Ready to go again?</p>
+        <button class="restart-btn" onclick="restartDeck()">Start over &rarr;</button>
+    </div>
+</div>
+
+<script>
+    const MAX_GUESSES = 6;
+    let caseBank      = [];
+    let diagnosisList = [];
+    let shuffledDeck  = [];   // current shuffled order, pops from the end
+    let currentCase   = null;
+    let casesPlayed   = 0;
+    let guessesTaken  = 0;
+    let gameOver      = false;
+    let acIndex       = -1;
+
+    /* ── Load CSV ── */
+    Papa.parse("cases.csv", {
+        download: true,
+        header: true,
+        skipEmptyLines: "greedy",
+        transformHeader: h => h.toLowerCase().trim().replace(/^\uFEFF/, '').replace(/ /g, '_'),
+        complete(results) {
+            const valid = results.data.filter(r => r.diagnosis && r.diagnosis.trim());
+            if (!valid.length) {
+                showError("CSV loaded but no valid cases found. Check your column headers.");
+                return;
+            }
+
+            caseBank = valid.map(r => ({
+                diagnosis: r.diagnosis.trim(),
+                accepted: (r.accepted_answers || "")
+                    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+                clues: [
+                    r.clue_1 || "Clue 1 missing",
+                    r.clue_2 || "Clue 2 missing",
+                    r.clue_3 || "Clue 3 missing",
+                    r.clue_4 || "Clue 4 missing",
+                    r.clue_5 || "Clue 5 missing",
+                    r.clue_6 || "Clue 6 missing",
+                ],
+                explanation: r.explanation || "No explanation provided.",
+                high_yield: r.high_yield || ""
+            }));
+
+            diagnosisList = [...new Set(caseBank.map(c => c.diagnosis))].sort();
+
+            document.getElementById('loading-area').style.display = 'none';
+            document.getElementById('game-area').style.display    = 'block';
+            document.getElementById('session-total').innerHTML =
+                `of <strong>${caseBank.length}</strong>`;
+            document.getElementById('all-done-count').textContent = caseBank.length;
+
+            buildDots();
+            buildClueSlots();
+            initAutocomplete();
+            restartDeck();   // shuffle and start
+        },
+        error() {
+            showError("Could not load cases.csv. Make sure it's in the same folder as index.html.");
+        }
+    });
+
+    function showError(msg) {
+        document.getElementById('loading-area').innerHTML = `<p class="error-msg">❌ ${msg}</p>`;
+    }
+
+    /* ── Shuffle (Fisher-Yates) ── */
+    function shuffle(arr) {
+        const a = [...arr];
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+    }
+
+    function restartDeck() {
+        shuffledDeck = shuffle(caseBank);
+        casesPlayed  = 0;
+        document.getElementById('all-done').style.display  = 'none';
+        document.getElementById('game-area').style.display = 'block';
+        startNextCase();
+    }
+
+    function startNextCase() {
+        if (shuffledDeck.length === 0) {
+            // Entire deck exhausted
+            document.getElementById('game-area').style.display = 'none';
+            document.getElementById('all-done').style.display  = 'block';
+            return;
+        }
+
+        currentCase  = shuffledDeck.pop();
+        casesPlayed++;
+        guessesTaken = 0;
+        gameOver     = false;
+
+        updateSessionBar();
+
+        for (let i = 0; i < MAX_GUESSES; i++) {
+            document.getElementById('dot-' + i).className = 'dot';
+            document.getElementById('clue-row-' + i).className = 'clue-row locked';
+            document.getElementById('clue-' + i).textContent = 'Clue locked…';
+        }
+
+        unlockClue(0);
+
+        const input = document.getElementById('guess-input');
+        input.value = '';
+        input.placeholder = 'Type your diagnosis…';
+        input.disabled = false;
+        closeDropdown();
+
+        document.getElementById('input-area').style.display     = 'flex';
+        document.getElementById('result-banner').style.display  = 'none';
+        document.getElementById('explanation').style.display    = 'none';
+        document.getElementById('play-again-btn').style.display = 'none';
+
+        input.focus();
+    }
+
+    function nextCase() {
+        startNextCase();
+    }
+
+    function updateSessionBar() {
+        const total = caseBank.length;
+        const done  = casesPlayed - 1;   // haven't finished current yet
+        const pct   = Math.round((done / total) * 100);
+        document.getElementById('session-text').innerHTML =
+            `Case <strong>${casesPlayed}</strong>`;
+        document.getElementById('session-fill').style.width = pct + '%';
+    }
+
+    /* ── Autocomplete ── */
+    function initAutocomplete() {
+        const input    = document.getElementById('guess-input');
+        const dropdown = document.getElementById('ac-dropdown');
+
+        input.addEventListener('input', () => {
+            const query = input.value.trim();
+            if (!query) { closeDropdown(); return; }
+            const matches = getMatches(query);
+            if (!matches.length) { closeDropdown(); return; }
+            renderDropdown(matches, query);
+        });
+
+        input.addEventListener('keydown', e => {
+            const items = dropdown.querySelectorAll('.ac-item');
+            if (!items.length) {
+                if (e.key === 'Enter') makeGuess();
+                return;
+            }
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                acIndex = Math.min(acIndex + 1, items.length - 1);
+                updateActive(items);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                acIndex = Math.max(acIndex - 1, -1);
+                updateActive(items);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (acIndex >= 0 && items[acIndex]) {
+                    selectItem(items[acIndex].dataset.value);
+                } else {
+                    makeGuess();
+                }
+            } else if (e.key === 'Escape') {
+                closeDropdown();
+            }
+        });
+
+        document.addEventListener('click', e => {
+            if (!e.target.closest('.input-wrapper')) closeDropdown();
+        });
+    }
+
+    function getMatches(query) {
+        const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+        return diagnosisList.filter(diag => {
+            const diagLower = diag.toLowerCase();
+            if (words.every(w => diagLower.includes(w))) return true;
+            const c = caseBank.find(x => x.diagnosis === diag);
+            return c && c.accepted.some(alias => words.every(w => alias.includes(w)));
+        }).slice(0, 8);
+    }
+
+    function renderDropdown(matches, query) {
+        const dropdown = document.getElementById('ac-dropdown');
+        const input    = document.getElementById('guess-input');
+        acIndex = -1;
+        dropdown.innerHTML = '';
+        matches.forEach(diag => {
+            const div = document.createElement('div');
+            div.className    = 'ac-item';
+            div.dataset.value = diag;
+            div.innerHTML    = highlight(diag, query);
+            div.addEventListener('mousedown', e => { e.preventDefault(); selectItem(diag); });
+            dropdown.appendChild(div);
+        });
+        dropdown.classList.add('visible');
+        input.classList.add('open');
+    }
+
+    function highlight(diag, query) {
+        const words = query.trim().split(/\s+/).filter(Boolean);
+        let result = diag;
+        words.forEach(w => {
+            const re = new RegExp(`(${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+            result = result.replace(re, '<mark>$1</mark>');
+        });
+        return result;
+    }
+
+    function updateActive(items) {
+        items.forEach((el, i) => el.classList.toggle('active', i === acIndex));
+        if (acIndex >= 0) items[acIndex].scrollIntoView({ block: 'nearest' });
+    }
+
+    function selectItem(value) {
+        document.getElementById('guess-input').value = value;
+        closeDropdown();
+        document.getElementById('guess-input').focus();
+    }
+
+    function closeDropdown() {
+        document.getElementById('ac-dropdown').classList.remove('visible');
+        document.getElementById('guess-input').classList.remove('open');
+        acIndex = -1;
+    }
+
+    /* ── Skeleton builders ── */
+    function buildDots() {
+        const el = document.getElementById('dots');
+        el.innerHTML = '';
+        for (let i = 0; i < MAX_GUESSES; i++) {
+            const d = document.createElement('div');
+            d.className = 'dot';
+            d.id = 'dot-' + i;
+            el.appendChild(d);
+        }
+    }
+
+    function buildClueSlots() {
+        const el = document.getElementById('clues-container');
+        el.innerHTML = '';
+        for (let i = 0; i < MAX_GUESSES; i++) {
+            const row = document.createElement('div');
+            row.className = 'clue-row locked';
+            row.id = 'clue-row-' + i;
+            row.innerHTML = `
+                <div class="clue-number">${i + 1}</div>
+                <div class="clue-box" id="clue-${i}">Clue locked&hellip;</div>`;
+            el.appendChild(row);
+        }
+    }
+
+    /* ── Game logic ── */
+    function unlockClue(index) {
+        document.getElementById('clue-row-' + index).className = 'clue-row';
+        document.getElementById('clue-' + index).textContent   = currentCase.clues[index];
+    }
+
+    function makeGuess() {
+        if (gameOver) return;
+        closeDropdown();
+
+        const input = document.getElementById('guess-input');
+        const guess = input.value.trim().toLowerCase();
+        if (!guess) return;
+        input.value = '';
+
+        const accepted = new Set([
+            ...currentCase.accepted,
+            currentCase.diagnosis.toLowerCase()
+        ]);
+
+        if (accepted.has(guess)) {
+            document.getElementById('dot-' + guessesTaken).className = 'dot correct';
+            endGame(true);
+            return;
+        }
+
+        document.getElementById('dot-' + guessesTaken).className = 'dot used';
+        guessesTaken++;
+
+        if (guessesTaken < MAX_GUESSES) {
+            unlockClue(guessesTaken);
+            const rem = MAX_GUESSES - guessesTaken;
+            input.placeholder = `Incorrect — ${rem} guess${rem !== 1 ? 'es' : ''} left`;
+            input.classList.add('wrong-flash');
+            input.addEventListener('animationend', () => input.classList.remove('wrong-flash'), { once: true });
+        } else {
+            for (let i = 0; i < MAX_GUESSES; i++) unlockClue(i);
+            endGame(false);
+        }
+    }
+
+    function endGame(won) {
+        gameOver = true;
+
+        // Update session bar to reflect completed case
+        const pct = Math.round((casesPlayed / caseBank.length) * 100);
+        document.getElementById('session-fill').style.width = pct + '%';
+
+        document.getElementById('input-area').style.display = 'none';
+        for (let i = 0; i < MAX_GUESSES; i++) unlockClue(i);
+
+        const banner = document.getElementById('result-banner');
+        banner.style.display = 'block';
+        banner.className = won ? 'result-banner win' : 'result-banner lose';
+        banner.textContent = won
+            ? '🎉 Correct! Well diagnosed.'
+            : `Game over — the diagnosis was: ${currentCase.diagnosis}`;
+
+        const expText = document.getElementById('explanation-text');
+        expText.innerHTML = currentCase.explanation +
+            (currentCase.high_yield
+                ? `<br><span class="high-yield-badge">⭐ ${currentCase.high_yield}</span>`
+                : '');
+        document.getElementById('explanation').style.display = 'block';
+
+        const btn = document.getElementById('play-again-btn');
+        btn.textContent = shuffledDeck.length > 0 ? 'Next case →' : 'See results →';
+        btn.style.display = 'block';
+    }
+</script>
+</body>
+</html>
